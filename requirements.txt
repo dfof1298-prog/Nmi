@@ -4,3 +4,5 @@ cloudscraper
 beautifulsoup4
 Telebot
 Flask
+faker
+BeautifulSoup
