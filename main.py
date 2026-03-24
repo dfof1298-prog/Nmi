@@ -26,7 +26,7 @@ CCN_KEYWORDS = [
 # ===============================================================
 
 stopuser = {}
-token = "8520709238:AAFf1psOsYuulYR2goGOYEObBunbd42mlrA"  # توكنك هنا
+token = "8546455855:AAFOl-NNSlYOIxOqQh8ev8EMnFdPtps3uoc"  # توكنك هنا
 bot = telebot.TeleBot(token, parse_mode="HTML")
 admin = 1093032296  # ايدي الادمن
 active_scans = set()
