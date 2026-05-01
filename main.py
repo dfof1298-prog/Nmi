@@ -123,7 +123,7 @@ def is_user_banned(user_id):
 
 # ==================== إعدادات البوت ====================
 stopuser = {}
-token = "7545888216:AAHs_RlaiEg8XXYlxR4V1C6YUhIW1axrwfo"  # توكن البوت الرئيسي
+token = "8520709238:AAFf1psOsYuulYR2goGOYEObBunbd42mlrA"  # توكن البوت الرئيسي
 bot = telebot.TeleBot(token, parse_mode="HTML")
 admin = 1093032296  # ايدي الادمن (أنت)
 active_scans = set()
